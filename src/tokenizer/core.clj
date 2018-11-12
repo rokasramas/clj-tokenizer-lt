@@ -52,13 +52,13 @@
 
 
 (defn into-tokens
-  "processes `chunk` and add product into `tokens`"
+  "processes `chunk` and adds product into `tokens`"
   [tokens [chunk chunk-spans]]
   (if (homogeneous chunk) (conj tokens chunk)
       (let [labels (tag chunk-spans)
             label-chunks (re-seq #"10*" labels)
             chunk-tokens (map #(->> % second (apply str)) (chop chunk label-chunks))]
-        (apply conj tokens chunk-tokens))))
+        (reduce conj tokens chunk-tokens))))
 
 
 (defn tokenize
