@@ -1,0 +1,11 @@
+{:deps    {org.clojure/clojure {:mvn/version "1.8.0"}
+           clj-crfsuite        {:mvn/version "0.5.2"}}
+ :paths   ["src" "resources"]
+ :aliases {:test     {:extra-paths ["test"]
+                      :extra-deps  {com.cognitect/test-runner {:git/url "https://github.com/cognitect-labs/test-runner.git"
+                                                               :sha     "028a6d41ac9ac5d5c405dfc38e4da6b4cc1255d5"}}
+                      :main-opts   ["-m" "cognitect.test-runner"]}
+           :kibit    {:extra-deps {jonase/kibit {:mvn/version "0.1.6"}}
+                      :main-opts  ["-e" "(require,'[kibit.driver,:as,k])(k/external-run,[\"src\"],nil)"]}
+           :eastwood {:main-opts  ["-m" "eastwood.lint" "{:source-paths,[\"src\"]}"]
+                      :extra-deps {jonase/eastwood {:mvn/version "RELEASE"}}}}}
