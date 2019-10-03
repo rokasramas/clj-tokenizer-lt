@@ -1,14 +1,17 @@
 (ns tokenizer.core
- (:require [clj-crfsuite.core :as crfsuite])
- (:gen-class))
+  (:require [clj-crfsuite.core :as crfsuite]
+            [clojure.string :as str])
+  (:gen-class))
 
+(defn- load-model [path left-span-length right-span-length]
+  {:tagger            (crfsuite/get-tagger path)
+   :left-span-length  left-span-length
+   :right-span-length right-span-length
+   :span-length       (+ left-span-length right-span-length)
+   :left-pad          (repeat left-span-length nil)
+   :right-pad         (repeat right-span-length nil)})
 
-(def tagger (crfsuite/get-tagger "resources/lt-model.crfsuite"))
-
-(def left-span-length 12)
-
-(def right-span-length 12)
-
+(def model (atom (load-model "resources/lt-model.crfsuite" 12 12)))
 
 (defn homogeneous
   "determines if `string` is made up
@@ -16,56 +19,73 @@
   [string]
   (re-matches #"^\p{L}+$|^\p{Z}+$|^\p{N}+$|^\.+$|^\[?!]+$|^\,+$" string))
 
-
 (defn get-feature
   "generates single feature given `chars-to-left` and `chars-to-right`"
   [chars-to-left chars-to-right]
-  (if (homogeneous (str (last chars-to-left) (first chars-to-right))) {:h "1"}
-      (let [index (range (- (count chars-to-left)) (count chars-to-right))
-            keys (map #(keyword (format "c%s" %)) index)
-            chars (map str (concat chars-to-left chars-to-right))]
-        (zipmap keys chars))))
+  (if (homogeneous (str (last chars-to-left) (first chars-to-right)))
+    {:h "1"}
+    (let [index (range (- (count chars-to-left)) (count chars-to-right))
+          keys (map #(keyword (format "c%s" %)) index)
+          chars (map str (concat chars-to-left chars-to-right))]
+      (zipmap keys chars))))
 
+(defn- get-features [character-context split-position]
+  (map #(->> (split-at split-position %)
+              (map (partial remove nil?))
+              (apply get-feature))
+        character-context))
 
 (defn tag
-  "predicts labels
-  in given `char-spans`"
-  [char-spans]
-  (apply str "1" (map :tag (crfsuite/tag
-                            (for [char-span (rest char-spans)]
-                              (->> char-span
-                                   (split-at left-span-length)
-                                   (map #(filter identity %))
-                                   (apply get-feature))) tagger))))
+  "predicts tags for given `character-context`"
+  [character-context]
+  (let [{split-position :left-span-length tagger :tagger} @model
+        features (get-features character-context split-position)]
+    (->> (crfsuite/tag features tagger)
+         (rest)
+         (map :tag)
+         (cons "1"))))
 
+(defn- apply-tags
+  [tags string]
+  (loop [[head & tail] (re-seq #"10*" (str/join tags))
+         start 0
+         tokens []]
+    (if (nil? head)
+      tokens
+      (let [end (+ start (count head))]
+        (->> (subs string start end)
+             (conj tokens)
+             (recur tail end))))))
 
-(defn chop
-  "divides `chain` of items
-  based on every `chunk` length"
-  [chain chunks]
-  (lazy-seq (if (empty? chunks) []
-                (let [chunk (first chunks)
-                      chunk-length (count chunk)
-                      chunk-spans (take chunk-length chain)]
-                  (cons [chunk chunk-spans]
-                        (chop (drop chunk-length chain) (rest chunks)))))))
-
-
-(defn into-tokens
-  "processes `chunk` and adds product into `tokens`"
-  [tokens [chunk chunk-spans]]
-  (if (homogeneous chunk) (conj tokens chunk)
-      (let [labels (tag chunk-spans)
-            label-chunks (re-seq #"10*" labels)
-            chunk-tokens (map #(->> % second (apply str)) (chop chunk label-chunks))]
-        (reduce conj tokens chunk-tokens))))
-
+(defn- chop
+  "divides string `chunks` into tokens
+  based on every `character-context`"
+  [character-context chunks]
+  (lazy-seq
+    (when (seq chunks)
+      (let [chunk (first chunks)
+            chunk-length (count chunk)]
+        (if (homogeneous chunk)
+          (cons
+            chunk
+            (chop
+              (drop chunk-length character-context)
+              (rest chunks)))
+          (concat
+            (-> (take chunk-length character-context)
+                (tag)
+                (apply-tags chunk))
+            (chop
+              (drop chunk-length character-context)
+              (rest chunks))))))))
 
 (defn tokenize
   "splits `string` into tokens"
-  [string]
-  (let [chunks (re-seq #"[^\p{Z}\r\t\n]+|[\p{Z}\r\t\n]+" string)
-        padded-string (concat (repeat left-span-length nil) string (repeat right-span-length nil))
-        span-length (+ left-span-length right-span-length)
-        spans (partition span-length 1 padded-string)]
-    (reduce into-tokens [] (chop spans chunks))))
+  ([string]
+   (tokenize string #"[^\p{Z}\r\t\n]+|[\p{Z}\r\t\n]+"))
+  ([string chunk-pattern]
+   (when (some? string)
+     (chop
+       (let [{:keys [left-pad right-pad span-length]} @model]
+         (partition span-length 1 (concat left-pad string right-pad)))
+       (re-seq chunk-pattern string)))))
