@@ -1,5 +1,6 @@
 (ns tokenizer.core
   (:require [clj-crfsuite.core :as crfsuite]
+            [clojure.java.io :as io]
             [clojure.string :as str])
   (:gen-class))
 
@@ -11,7 +12,7 @@
    :left-pad          (repeat left-span-length nil)
    :right-pad         (repeat right-span-length nil)})
 
-(def model (atom (load-model "resources/lt-model.crfsuite" 12 12)))
+(def model (atom (load-model (.getPath (io/resource "lt-model.crfsuite")) 12 12)))
 
 (defn homogeneous
   "determines if `string` is made up
